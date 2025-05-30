@@ -1,0 +1,220 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String       @id @default(uuid())
+  email             String       @unique
+  name              String?
+  organizationId    String?
+  googleTokens      String?      // Encrypted Google OAuth tokens (JSON string)
+  zoomTokens        String?      // Encrypted Zoom OAuth tokens (JSON string)
+  slackUserId       String?      // Slack user ID
+  slackTeamId       String?      // Slack workspace ID
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  averageHourlyCost Float?       // For cost calculations
+  timeZone          String       @default("UTC")
+  preferences       String?      // User preferences for notifications, etc. (JSON string)
+  meetings          Meeting[]
+  organization      Organization? @relation(fields: [organizationId], references: [id])
+  meetingFlags      MeetingFlag[]
+  summaries         Summary[]
+  weeklyStats       WeeklyStat[]
+  agendas           Agenda[]
+  auditResults      AuditResult[]
+  slackInstalls     SlackInstallation[]
+}
+
+model Organization {
+  id              String   @id @default(uuid())
+  name            String
+  domain          String?  // e.g., company.com
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  settings        String?  // Organization-wide settings (JSON string)
+  slackWorkspaceId String? // Slack workspace ID
+  users           User[]
+  auditResults    AuditResult[]
+}
+
+model Meeting {
+  id            String        @id @default(uuid())
+  externalId    String?       // Google Calendar or Zoom ID
+  title         String
+  description   String?
+  startTime     DateTime
+  endTime       DateTime
+  isRecurring   Boolean       @default(false)
+  recurrenceId  String?       // For recurring meeting instances
+  recurrenceRule String?      // RRULE for recurring meetings
+  organizer     String?       // Email of organizer
+  organizerId   String        // User ID of the person who imported this meeting
+  hasAgenda     Boolean       @default(false)
+  inviteeCount  Int?
+  attendeeCount Int?
+  zoomMeetingId String?       // If it's a Zoom meeting
+  zoomDuration  Int?          // Actual duration from Zoom in minutes
+  transcript    String?       // Meeting transcript
+  recordingUrl  String?       // Meeting recording URL
+  status        String        @default("scheduled") // scheduled, completed, cancelled
+  estimatedCost Float?        // Cost based on attendee hourly rates
+  location      String?       // Meeting location or URL
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  user          User          @relation(fields: [organizerId], references: [id])
+  attendees     Attendee[]
+  flags         MeetingFlag[]
+  summaries     Summary[]
+  agendas       Agenda[]
+  
+  @@index([organizerId])
+  @@index([startTime])
+  @@index([isRecurring, recurrenceId])
+}
+
+model Attendee {
+  id        String   @id @default(uuid())
+  meetingId String
+  email     String
+  name      String?
+  status    String?  // invited, accepted, declined, attended
+  isOptional Boolean @default(false)
+  estimatedHourlyCost Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  meeting   Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, email])
+}
+
+model MeetingFlag {
+  id          String   @id @default(uuid())
+  meetingId   String
+  userId      String
+  issueType   String   // NO_AGENDA, REDUNDANT_MEETING, OVERBOOKED, TOO_MANY_ATTENDEES, etc.
+  description String
+  severity    String   // LOW, MEDIUM, HIGH, CRITICAL
+  isResolved  Boolean  @default(false)
+  autoDetected Boolean @default(true)
+  estimatedTimeSavings Float? // In hours
+  resolvedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id])
+  
+  @@index([userId, isResolved])
+  @@index([issueType])
+}
+
+model Summary {
+  id          String   @id @default(uuid())
+  meetingId   String
+  userId      String
+  summary     String   // The AI-generated summary text
+  actionItems String?  // Array of action items with assignees (JSON string)
+  keyDecisions String? // Key decisions made (JSON string)
+  nextSteps   String?  // Next steps identified (JSON string)
+  sentiment   String?  // positive, neutral, negative
+  topics      String?  // Topics discussed (JSON string)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id])
+}
+
+model Agenda {
+  id          String   @id @default(uuid())
+  meetingId   String
+  userId      String
+  title       String
+  items       String   // Array of agenda items with time allocations (JSON string)
+  objectives  String?  // Meeting objectives (JSON string)
+  preparationNotes String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id])
+}
+
+model WeeklyStat {
+  id                String   @id @default(uuid())
+  userId            String
+  weekStart         DateTime
+  totalMeetingHours Float
+  hoursSaved        Float?
+  meetingsFlagged   Int?
+  meetingsCancelled Int?
+  focusTimeCreated  Float?   // Hours of focus time created
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, weekStart])
+}
+
+model AuditResult {
+  id               String   @id @default(uuid())
+  userId           String?
+  organizationId   String?
+  type             String   // DUPLICATE_MEETINGS, OVERBOOKED_PERIODS, NO_AGENDA_MEETINGS, etc.
+  title            String
+  description      String
+  severity         String   // LOW, MEDIUM, HIGH, CRITICAL
+  affectedMeetings String   // Array of meeting IDs (JSON string)
+  suggestions      String   // Array of suggested actions (JSON string)
+  estimatedSavings Float?   // Estimated time savings in hours
+  status           String   @default("pending") // pending, resolved, dismissed
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User?    @relation(fields: [userId], references: [id])
+  organization     Organization? @relation(fields: [organizationId], references: [id])
+  
+  @@index([userId])
+  @@index([organizationId])
+  @@index([type, status])
+}
+
+model SlackInstallation {
+  id          String   @id @default(uuid())
+  userId      String
+  teamId      String   // Slack workspace ID
+  teamName    String?
+  botToken    String   // Encrypted bot token
+  userToken   String?  // Encrypted user token
+  scope       String   // OAuth scopes
+  isActive    Boolean  @default(true)
+  webhookUrl  String?  // Slack webhook URL
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id])
+  
+  @@unique([userId, teamId])
+}
+
+model BotInteraction {
+  id            String   @id @default(uuid())
+  userId        String?  // User who interacted
+  slackUserId   String?  // Slack user ID
+  slackTeamId   String?  // Slack workspace ID
+  channelId     String?  // Slack channel ID
+  command       String   // Command used (/agenda, /meeting-audit, etc.)
+  parameters    String?  // Command parameters (JSON string)
+  response      String?  // Bot response
+  status        String   @default("completed") // pending, completed, failed
+  createdAt     DateTime @default(now())
+  
+  @@index([slackUserId, slackTeamId])
+  @@index([command])
+  @@index([createdAt])
+}
