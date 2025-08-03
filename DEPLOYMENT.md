@@ -1,6 +1,5 @@
 # StopMeet Deployment Guide
 
-> 🚀 **YC-Ready Enterprise Meeting Governance Platform**
 
 This guide covers deployment options for StopMeet, from local development to production-ready enterprise deployments.
 
